@@ -46,3 +46,17 @@ class WrongLabelLogger:
         path = path + '/logger.json'
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(self.logger, f, indent=2, ensure_ascii=False)
+
+def get_scheduler(opt, sc_mode='min', sc_factor=0.8, sc_patience=10, sc_verbose=True, sc_threshold=0.0001,
+                  sc_threshold_mode='rel', sc_cooldown=0, sc_min_lr=0, sc_eps=1e-8):
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, mode=sc_mode, factor=sc_factor, patience=sc_patience,
+                                                           verbose=sc_verbose, threshold=sc_threshold,
+                                                           threshold_mode=sc_threshold_mode, cooldown=sc_cooldown,
+                                                           min_lr=sc_min_lr, eps=sc_eps)
+    return scheduler
+
+def neg_label(label):
+    b = torch.ones_like(label)
+    label = b + torch.neg(label)
+
+    return label
