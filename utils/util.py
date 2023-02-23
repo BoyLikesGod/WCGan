@@ -3,9 +3,12 @@ import pickle
 import json
 import os
 import time
+from tqdm import tqdm
 
 import torch
+import torch.nn as nn
 import numpy as np
+from sklearn import metrics
 
 
 def get_current_time():
@@ -76,3 +79,32 @@ def get_save_dir():
         os.mkdir(save_path)
 
     return save_path
+
+def predict(model, config, dataloaders):
+    model.eval()
+    embedding = nn.Embedding.from_pretrained(config.pretrained, freeze=True).to(config.device)
+    for dataloader in dataloaders:
+        predicts_all, labels_all = np.array([], dtype=int), np.array([], dtype=int)
+        with torch.no_grad():
+            loop = tqdm(range(10))
+            loop.set_description('Eval {}'.format(dataloader))
+            for i in loop:
+                total_len = len(dataloaders[dataloader])
+                for item, data in enumerate(dataloaders[dataloader]):
+                    post, label = data[0].to(config.device), data[1].to(config.device)
+                    post = embedding(post)
+                    out = model(post)
+
+                    labels = torch.argmax(label, 1).data.cpu().numpy()
+                    predicts = torch.argmax(out.data, 1).cpu().numpy()
+
+                    labels_all = np.append(labels_all, labels)
+                    predicts_all = np.append(predicts_all, predicts)
+
+                    acc = metrics.accuracy_score(labels_all, predicts_all)
+                    f1_score = metrics.f1_score(labels_all, predicts_all, average='macro')
+                    precision = metrics.precision_score(labels_all, predicts_all, average='macro')
+                    recall = metrics.recall_score(labels_all, predicts_all, average='macro')
+
+                    loop.set_postfix(scheduler=f'[{item+1} | {total_len}', norm=f'[acc: {acc}, f1_score: {f1_score}, precision: {precision}, recall: {recall}[')
+

@@ -8,7 +8,7 @@ import numpy as np
 
 import model as Module
 import utils.util as ut
-from utils.dataset import buildDataset, data_collate
+from utils.dataset import buildDataset, data_collate, get_eval_dataloader
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)-15s %(levelname)s: %(message)s')
 
@@ -23,8 +23,6 @@ if __name__ == '__main__':
 
     # load model config
     config = Module.Config()
-    config.device = ut.get_device(config.device)
-    config.dataset = 'pheme9'
     print(f"dataset: {config.dataset}", f"pad size: {config.pad_size}", sep='\n-->')
 
     # load vocab
@@ -52,6 +50,7 @@ if __name__ == '__main__':
 
     # build model
     logging.info("Building Model...")
+    config.save_dir = ut.get_save_dir()     # 数据保存地址
     model = Module.WCGan(config)
     print('model', model, sep='------->')
     model(norumor_train_dataloader, rumor_train_dataloader, test_dataloader)
@@ -59,3 +58,7 @@ if __name__ == '__main__':
     end_time = time.time()
     logging.info(f'End        total run time: {end_time - start_time}')
 
+    print('eval========>')
+    eval_dataloader = get_eval_dataloader(config)
+    discriminator = torch.load(f'{config.save_dir}/bestAccuracy.pth')
+    ut.predict(discriminator, config, eval_dataloader)

@@ -13,12 +13,14 @@ def get_post(content, vocab, pad_size, unk, pad):
         idx = vocab.index(word) if word in vocab else unk
         post.append(idx)
     if len(post) < pad_size:
-        pad_width = pad_size - len(post)
+        length = len(post)
+        pad_width = pad_size - length
         # 填充pad到post里面，填充的长度为pad_width
         post = np.pad(post, (0, pad_width), mode='constant', constant_values=pad)
-    elif len(post) > pad_size:
+    else:
         post = post[:pad_size]
-    return post
+        length = len(post)
+    return post, length
 
 
 def get_label(label):
@@ -27,6 +29,9 @@ def get_label(label):
     return mask
 
 def data_collate(batch):
+
+    batch.sort(key=lambda data: data[0].shape[0], reverse=True)
+
     post = [item[0].numpy() for item in batch]
     label = [item[1].numpy() for item in batch]
     length = [item[2] for item in batch]
@@ -75,11 +80,10 @@ class buildDataset(data.Dataset):
             label: torch.Tensor non-rumor[1., 0.] rumor[0., 1.]
         """
         content = self.data[index]
-        post = get_post(content, self.vocab, self.pad_size, self.unk, self.pad)
+        post, length = get_post(content, self.vocab, self.pad_size, self.unk, self.pad)
 
         # 将句子中的词，转换为词序列
         label = content['label']
-        length = content['length']
         name = content['post name']
         news = content['news']
 
@@ -90,3 +94,37 @@ class buildDataset(data.Dataset):
 
     def __len__(self):
         return len(self.data)
+
+def get_dataloader(config, mod):
+    current_dataset = buildDataset(config, mod)
+    if mod == 'train':
+        batch = config.train_batch
+    elif mod == 'test':
+        batch = config.test_batch
+    else:
+        batch = config.eval_batch
+    current_dataloader = data.DataLoader(current_dataset, batch_size=batch,
+                                             num_workers=config.data_numworker, shuffle=True,
+                                             collate_fn=data_collate, drop_last=True)
+    return current_dataloader
+
+def get_eval_dataloader(config):
+    ch_dataloader = get_dataloader(config, 'charlie-hebdo')
+    fe_dataloader = get_dataloader(config, 'ferguson')
+    ge_dataloader = get_dataloader(config, 'germanwings-crash')
+    ot_dataloader = get_dataloader(config, 'ottawa-shooting')
+    pu_dataloader = get_dataloader(config, 'putin-missing')
+    sy_dataloader = get_dataloader(config, 'sydney-siege')
+    test_all = get_dataloader(config, 'test')
+    train_all = get_dataloader(config, 'train')
+
+    dataloader = {'train-all': train_all,
+                  'test-all': test_all,
+                  'charlie-hebdo': ch_dataloader,
+                  'ferguson': fe_dataloader,
+                  'germanwings-crash': ge_dataloader,
+                  'ottawa-shooting': ot_dataloader,
+                  'putin-missing': pu_dataloader,
+                  'sydney-siege': sy_dataloader}
+
+    return dataloader
