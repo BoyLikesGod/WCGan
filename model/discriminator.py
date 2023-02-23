@@ -20,8 +20,7 @@ class Discriminator(nn.Module):
 
         self.fc = nn.Linear(config.dis_rnn_hidden_size * 2, config.num_class).to(config.device)
 
-    def forward(self, x, state=None):
-        emb = self.embedding(x)
+    def forward(self, emb, state=None):
         batch, pad_size, embedding_size = emb.size()
         if state is None:
             h = torch.randn(self.config.dis_rnn_lstm_layers * 2, batch, self.config.dis_rnn_hidden_size).float().to(

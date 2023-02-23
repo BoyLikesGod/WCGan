@@ -18,19 +18,14 @@ random.seed(seed)
 np.random.seed(seed)
 torch.manual_seed(seed)
 
-# set dataset and gpu
-dataset_name = 'pheme9'
-gpu = 'cuda:3'
-
 if __name__ == '__main__':
-    device = ut.get_device(gpu)
     start_time = time.time()
 
     # load model config
     config = Module.Config()
-    config.device = device
-    config.dataset = dataset_name
-    print(f"dataset: {dataset_name}", f"pad size: {config.pad_size}", sep='\n-->')
+    config.device = ut.get_device(config.device)
+    config.dataset = 'pheme9'
+    print(f"dataset: {config.dataset}", f"pad size: {config.pad_size}", sep='\n-->')
 
     # load vocab
     logging.info("Loading Vocab...")

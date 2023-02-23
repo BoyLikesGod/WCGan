@@ -1,4 +1,5 @@
 from tqdm import tqdm
+import os
 
 import torch
 import torch.nn as nn
@@ -7,16 +8,18 @@ import numpy as np
 from sklearn import metrics
 
 from utils.target import draw_target
-from utils.util import WrongLabelLogger, get_scheduler, neg_label
-from generator import Generator
-from discriminator import Discriminator
+from utils.util import WrongLabelLogger, get_scheduler, neg_label, get_save_dir
+from model.generator import Generator
+# from model.transformer import Generator
+from model.discriminator import Discriminator
 
 
 class Config:
     def __init__(self):
+        self.device = 'cuda:2'
         self.data_numworker = 4  # 加载数据集时的线程
         self.train_batch = 32  # 训练集的batch大小
-        self.test_batch = 32  # 测试集的batch大小
+        self.test_batch = 64  # 测试集的batch大小
         self.epochs = 500  # 训练迭代次数
 
         # 词向量
@@ -29,51 +32,60 @@ class Config:
         self.lr_d = 0.01
         # 训练判别器时，生成数据在判别器上的损失权重
         self.ge_weight = 0.5
-        self.re_weight = 0
         # 训练生成器的损失权重
-        self.id_weight = 5
-        self.cycle_weight = 10
+        self.id_weight = 4
+        self.cycle_weight = 8
 
         # generator config
         self.gen_rnn_hidden_size = self.embedding_dim
         self.gen_rnn_num_layers = 4
-        self.gen_rnn_dropout = 0.4
+        self.gen_rnn_dropout = 0.5
 
         # discriminator config
         self.dis_rnn_hidden_size = self.embedding_dim  # LSTM中隐藏层的大小
-        self.dis_rnn_lstm_layers = 4  # RNN中LSTM的层数
-        self.dis_rnn_dropout = 0.4  # LSTM中的dropout rate
+        self.dis_rnn_lstm_layers = 2  # RNN中LSTM的层数
+        self.dis_rnn_dropout = 0.5  # LSTM中的dropout rate
+
+        # transformer generator
+        self.gen_num_encoder = 6
+        self.gen_num_head = 4
+        self.gen_feed_forward_hidden_size = 256
+        self.gen_encoder_dropout = 0.5
+        self.gen_positional_dropout = 0.5  # 位置编码时的dropout rate
+
+        # 数据保存地址
+        self.save_dir = get_save_dir()
 
 
 class WCGan(nn.Module):
     def __init__(self, config):
         super(WCGan, self).__init__()
         self.config = config
-        self.mes = f'{config.model_name}  ' \
+        self.mes = f'GanModel  ' \
                    f'dataset: {config.dataset}  ' \
-                   f'pad size: {config.pad_size}  ' \
-                   f'embedding dim: {config.embedding_dim}  ' \
-                   f'dis weight:[{config.ge_weight}, {config.re_weight}]  ' \
-                   f'gen weight:[{config.id_weight}, {config.cycle_weight}]'
+                   f'pad-emb:[{config.pad_size}, {config.embedding_dim}]  ' \
+                   f'dis/gen weight:[{config.ge_weight}] [{config.id_weight}, {config.cycle_weight}]  ' \
+                   f'layers:[{config.gen_rnn_num_layers}, {config.dis_rnn_lstm_layers}]'
         print('\n'.join(self.mes.split('  ')))
 
         self.embedding = nn.Embedding.from_pretrained(config.pretrained, freeze=False).to(self.config.device)
 
-        self.G_r = Generator(self.config)   # 谣言生成器
-        self.G_n = Generator(self.config)   # 非谣言生成器
-        self.D = Discriminator(self.config) # 判别器
+        self.G_r = Generator(self.config)  # 谣言生成器
+        self.G_n = Generator(self.config)  # 非谣言生成器
+        self.D = Discriminator(self.config)  # 判别器
 
         self.adv_loss = nn.BCEWithLogitsLoss().to(self.config.device)
 
         # 优化器
         self.G_n_optimizer = torch.optim.RMSprop(self.G_n.parameters(), lr=config.lr_g)
         self.G_r_optimizer = torch.optim.RMSprop(self.G_r.parameters(), lr=config.lr_g)
-        self.D_optimizer = torch.optim.RMSprop(self.D.parameters(), lr=config.lr_d)
+        # self.D_optimizer = torch.optim.RMSprop(self.D.parameters(), lr=config.lr_d)
+        self.D_optimizer = torch.optim.Adam(self.D_optimizer(), lr=config.lr_d)
 
         self.train_acc, self.test_acc = [], []
         self.train_f1, self.test_f1 = [], []
 
-        self.loss_d, self.loss_gr, self.loss_gn, self.loss_g = 0, 0, 0, 0
+        self.loss_d, self.loss_gr, self.loss_gn, self.loss_g, self.best_acc = 0, 0, 0, 0, 0
 
         self.wrong_label_logger = WrongLabelLogger()
 
@@ -90,7 +102,7 @@ class WCGan(nn.Module):
                         total=min(len(norumor_train_dataloader), len(rumor_train_dataloader)))
             loop.set_description(f"Training--[Epoch {epoch + 1} : {self.config.epochs}]")
             predict, true = np.array([]), np.array([])
-
+            flag = torch.randint(0, 2, [1])  # 0:norumor 1:rumor
             # 一个epoch的训练过程
             for i, data in loop:
                 # flag+ 1， 上次是谣言，这次就训练非谣言
@@ -123,6 +135,10 @@ class WCGan(nn.Module):
                 loop.set_postfix(acc=format(acc, '.5f'), f1=f'[{f1_s}, {f1}]',
                                  loss="[{:.4f}|{:.4f}]".format(self.loss_d, self.loss_g))
             test_acc, test_f1, test_loss = self.test(test_dataloader, epoch)
+            if test_acc > self.best_acc:
+                self.best_acc = test_acc
+                torch.save(self.D.state_dict(), os.path.join(self.config.save_dir, f'bestAccuracy.pt'))
+                print('model saved')
             self.train_acc.append(acc)
             self.test_acc.append(test_acc)
             self.train_f1.append(f1_s)
@@ -132,9 +148,8 @@ class WCGan(nn.Module):
             scheduler_Gr.step(self.loss_gr)
             scheduler_Gn.step(self.loss_gn)
 
-        save_path = draw_target(self.train_acc, self.test_acc, self.train_f1, self.test_f1, self.config.model_name,
-                                self.mes)
-        self.wrong_label_logger.write(save_path)
+        draw_target(self.train_acc, self.test_acc, self.train_f1, self.test_f1, self.config.save_dir, self.mes)
+        self.wrong_label_logger.write(self.config.save_dir)
 
     def train_discriminator(self, flag, or_post, or_label):
         self.D_optimizer.zero_grad()
@@ -144,18 +159,13 @@ class WCGan(nn.Module):
 
         if flag == 0:  # norumor
             ge_post = self.G_r(or_post)
-            re_post = self.G_n(ge_post)
         else:  # rumor
             ge_post = self.G_n(or_post)
-            re_post = self.G_r(or_post)
 
         ge_out = self.D(ge_post)
         ge_loss = self.adv_loss(ge_out, neg_label(or_label))
 
-        re_out = self.D(re_post)
-        re_loss = self.adv_loss(re_out, or_label)
-
-        loss_d = or_loss + ge_loss * self.config.ge_weight + re_loss * self.config.re_weight
+        loss_d = or_loss + ge_loss * self.config.ge_weight
         loss_d.backward(retain_graph=True)
 
         self.loss_d = loss_d
@@ -180,22 +190,21 @@ class WCGan(nn.Module):
             re_post = self.G_r(ge_post)
 
         re_out = self.D(re_post)
+        # loss_id = -torch.mean(an_post) + torch.mean(id_post)
+        # loss_ge = -torch.mean(self.D(or_post)) + torch.mean(self.D(ge_post))
+        # loss_cy = self.adv_loss(re_out, or_label)
+        # loss_g = loss_ge + loss_id * self.config.id_weight + loss_cy * self.config.cycle_weight
 
         # loss_id = -torch.mean(self.D(an_post)) + torch.mean(self.D(id_post))
-        loss_id = -torch.mean(an_post) + torch.mean(id_post)
         # loss_id = self.adv_loss(self.D(id_post), neg_label(or_label))
-        loss_ge = -torch.mean(self.D(or_post)) + torch.mean(self.D(ge_post))
-        loss_cy = self.adv_loss(re_out, or_label)
         # loss_cy = -torch.mean(self.D(or_post)) + torch.mean(self.D(re_post))
 
-        """这个结果很差
+        # GAN模型损失
         ge_out = self.D(ge_post)
-
-        loss_id = -torch.mean(self.D(an_post)) + torch.mean(self.D(id_post))
         loss_ge = self.adv_loss(ge_out, neg_label(or_label))
-        loss_cy = -torch.mean(self.D(or_post)) + torch.mean(self.D(re_post))"""
+        re_loss = torch.dist(or_post, re_post, p=1) * 0.001
+        loss_g = loss_ge + re_loss
 
-        loss_g = loss_ge + loss_id * self.config.id_weight + loss_cy * self.config.cycle_weight
         loss_g.backward(retain_graph=True)
         self.loss_g = loss_g
 
@@ -233,7 +242,7 @@ class WCGan(nn.Module):
                 acc = metrics.accuracy_score(labels_all, predicts_all)
                 f1 = metrics.f1_score(labels_all, predicts_all, average=None)
                 # f1_s = metrics.f1_score(labels_all, predicts_all, average='weighted')
-                f1_s = metrics.f1_score(labels_all, predicts_all, average='micro')
+                f1_s = metrics.f1_score(labels_all, predicts_all, average='macro')
                 total_loss = (loss_all / i).item()
 
                 loop.set_postfix(acc=format(acc, '.5f'), f1=f'[{f1_s}, {f1}]',

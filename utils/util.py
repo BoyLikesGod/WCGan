@@ -1,10 +1,17 @@
 import logging
 import pickle
 import json
+import os
+import time
 
 import torch
 import numpy as np
 
+
+def get_current_time():
+    """获取已使用时间"""
+    current_time = time.strftime('%Y-%m-%d %H：%M：%S', time.localtime(time.time()))
+    return current_time
 
 def get_device(gpu):
     USE_CUDA = torch.cuda.is_available()
@@ -14,14 +21,14 @@ def get_device(gpu):
 
 
 def load_vocab_and_embedding(dataset):
-    embedding_path = f'dataset/{dataset}/{dataset}_embedding.npz'
-    vocab_path = f'dataset/{dataset}/{dataset}_vocab.pkl'
+    embedding_path = f'dataset/{dataset}_embedding.npz'
+    vocab_path = f'dataset/{dataset}_vocab.pkl'
 
     with open(vocab_path, 'rb') as f:
         vocab = pickle.load(f)
         vocab_size = len(vocab)
 
-    pretrained_embedding = torch.tensor(np.load(embedding_path)['embeddings'].astype("float32"))
+    pretrained_embedding = torch.tensor(np.load(embedding_path, allow_pickle=True)['embeddings'].astype("float32"))
     embedding_dim = pretrained_embedding.size(1)
 
     print('', f'vocab size: {vocab_size}', f'embedding dim: {embedding_dim}', sep='\n-->')
@@ -31,6 +38,7 @@ def load_vocab_and_embedding(dataset):
 class WrongLabelLogger:
     def __init__(self):
         self.logger = {}
+        self.class_accuracy = {}
 
     def log(self, label_index, out_index, data):
         wrong_index = label_index - out_index
@@ -60,3 +68,11 @@ def neg_label(label):
     label = b + torch.neg(label)
 
     return label
+
+def get_save_dir():
+    current_time = get_current_time()
+    save_path = "result/" + current_time
+    if not os.path.isdir(save_path):
+        os.mkdir(save_path)
+
+    return save_path

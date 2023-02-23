@@ -3,25 +3,9 @@ import numpy as np
 import time
 import os
 
-
-def get_current_time():
-    """获取已使用时间"""
-    current_time = time.strftime('%Y-%m-%d %H：%M：%S', time.localtime(time.time()))
-    return current_time
-
-def draw_target(train_acc, test_acc, train_f1, test_f1, name, message):
-    current_time = str(get_current_time())
-    save_path = f"result/{name}"
-    if not os.path.isdir(save_path):
-        os.mkdir(save_path)
-    save_path = save_path + "/" + current_time
-    if not os.path.isdir(save_path):
-        os.mkdir(save_path)
-
+def draw_target(train_acc, test_acc, train_f1, test_f1, save_path, message):
     draw_acc(train_acc, test_acc, message, save_path)
     draw_f1(train_f1, test_f1, message, save_path)
-
-    return save_path
 
 
 def draw_f1(train_f1, test_f1, message, save_path):

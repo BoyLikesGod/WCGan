@@ -9,7 +9,7 @@ import numpy as np
 
 def get_post(content, vocab, pad_size, unk, pad):
     post = []
-    for word in content['event'].split(' '):
+    for word in content['post'].split(' '):
         idx = vocab.index(word) if word in vocab else unk
         post.append(idx)
     if len(post) < pad_size:
@@ -31,11 +31,12 @@ def data_collate(batch):
     label = [item[1].numpy() for item in batch]
     length = [item[2] for item in batch]
     name = [item[3] for item in batch]
+    news = [item[4] for item in batch]
 
     post = torch.tensor(np.array(post), dtype=torch.int)
     label = torch.tensor(np.array(label), dtype=torch.float32)
 
-    return post, label, length, name
+    return post, label, length, name, news
 
 class buildDataset(data.Dataset):
     def __init__(self, config, mode):
@@ -45,9 +46,9 @@ class buildDataset(data.Dataset):
         :param mode:'rumor_train', 'norumor_train', 'train', 'test'
         """
         super(buildDataset, self).__init__()
-        self.index = f'dataset/{config.dataset}/{config.dataset}_index.pkl'
+        self.index = f'dataset/{config.dataset}_index.pkl'
         # 数据集索引，一个字典{'rumor_train':a, 'rumor_test':b, 'norumor_train':c, 'norumor_test':d},a, b, c, d 是四个列表，存放着数据集中推文的id
-        self.dataset = f'dataset/{config.dataset}/{config.dataset}_data.pkl'
+        self.dataset = f'dataset/{config.dataset}_data.pkl'
         # 数据集，一个字典{post name, label, post, len}
 
         self.pad_size = config.pad_size  # 句子长度
@@ -79,9 +80,13 @@ class buildDataset(data.Dataset):
         # 将句子中的词，转换为词序列
         label = content['label']
         length = content['length']
-        name = content['event name']
+        name = content['post name']
+        news = content['news']
 
         post = torch.tensor(post).type(torch.int32)
         label = get_label(label)
 
-        return post, label, length, name
+        return post, label, length, name, news
+
+    def __len__(self):
+        return len(self.data)
